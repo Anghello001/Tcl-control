@@ -14,11 +14,13 @@ import { NetworkScannerModal } from './components/NetworkScannerModal.tsx';
 import { TclPairingAssistantModal } from './components/TclPairingAssistantModal.tsx';
 import { BluetoothPairingModal } from './components/BluetoothPairingModal.tsx';
 import { NetworkDiagnosticsModal } from './components/NetworkDiagnosticsModal.tsx';
+import { BitriseApkModal } from './components/BitriseApkModal.tsx';
 import { soundFX } from './services/soundEffects.ts';
 import { haptics } from './services/haptics.ts';
 import { FullscreenManager } from './services/fullscreenService.ts';
 import { UniversalTvEngine } from './services/universalTvEngine.ts';
 import { DirectTvBridge } from './services/directTvBridge.ts';
+import { NativeBridge } from './services/nativeBridge.ts';
 import { BluetoothTvDevice, bluetoothManager } from './services/bluetoothGamepadService.ts';
 
 export default function App() {
@@ -31,6 +33,7 @@ export default function App() {
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [showBluetoothModal, setShowBluetoothModal] = useState(false);
   const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [showBitriseModal, setShowBitriseModal] = useState(false);
   const [showSimulator, setShowSimulator] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
@@ -102,6 +105,11 @@ export default function App() {
   // Handle sending commands via Direct Multi-Protocol Bridge
   const handleSendCommand = async (cmd: string, type: 'press' | 'down' | 'up' = 'press') => {
     setLastDispatchedCommand(cmd);
+
+    // Native APK Haptics
+    if (hapticsEnabled) {
+      NativeBridge.triggerHaptic(cmd.startsWith('Button') ? 'medium' : 'light');
+    }
 
     // 1. Bluetooth Dispatch if active
     if (bluetoothManager.isConnected) {
@@ -188,6 +196,7 @@ export default function App() {
         onOpenPairing={() => setShowPairingModal(true)}
         onOpenBluetooth={() => setShowBluetoothModal(true)}
         onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
+        onOpenBitrise={() => setShowBitriseModal(true)}
         showSimulator={showSimulator}
         onToggleSimulator={() => setShowSimulator(!showSimulator)}
         soundEnabled={soundEnabled}
@@ -305,6 +314,11 @@ export default function App() {
             setDevice({ ...device, ip: newIp });
           }
         }}
+      />
+
+      <BitriseApkModal
+        isOpen={showBitriseModal}
+        onClose={() => setShowBitriseModal(false)}
       />
 
     </div>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TCL GamePulse</string>
+    <string name="title_activity_main">TCL GamePulse</string>
+    <string name="package_name">com.tclgamepulse.remote</string>
+    <string name="custom_url_scheme">com.tclgamepulse.remote</string>
+</resources>

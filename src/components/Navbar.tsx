@@ -17,7 +17,7 @@ import {
   Radio,
   Bluetooth,
   Activity,
-  Search
+  Smartphone
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -29,6 +29,7 @@ interface NavbarProps {
   onOpenPairing: () => void;
   onOpenBluetooth: () => void;
   onOpenDiagnostics: () => void;
+  onOpenBitrise: () => void;
   showSimulator: boolean;
   onToggleSimulator: () => void;
   soundEnabled: boolean;
@@ -48,6 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenPairing,
   onOpenBluetooth,
   onOpenDiagnostics,
+  onOpenBitrise,
   showSimulator,
   onToggleSimulator,
   soundEnabled,
@@ -65,24 +67,24 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800 px-3 py-2.5">
+    <header className="sticky top-0 z-40 w-full bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-3 py-2.5">
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
         
         {/* Brand & Connection Badges */}
         <div className="flex items-center gap-2">
-          <span className="font-mono font-bold text-sm text-neutral-100 tracking-wider">TCL</span>
+          <span className="font-mono font-bold text-sm text-zinc-100 tracking-wider">TCL</span>
           
           {/* Bluetooth Status */}
           <button
             onClick={onOpenBluetooth}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs transition-colors border ${
               bluetoothDevice
-                ? 'bg-neutral-800 border-neutral-600 text-neutral-100'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-200'
+                ? 'bg-zinc-800 border-zinc-600 text-zinc-100'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200'
             }`}
             title="Conexión Bluetooth (Mando Inalámbrico)"
           >
-            <Bluetooth className={`w-3.5 h-3.5 ${bluetoothDevice ? 'text-neutral-100' : 'text-neutral-400'}`} />
+            <Bluetooth className={`w-3.5 h-3.5 ${bluetoothDevice ? 'text-zinc-100' : 'text-zinc-400'}`} />
             <span className="font-mono text-[11px] hidden sm:inline">
               {bluetoothDevice ? bluetoothDevice.name.slice(0, 12) : 'Bluetooth'}
             </span>
@@ -91,16 +93,26 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Wi-Fi / IP Diagnostics Button */}
           <button
             onClick={onOpenDiagnostics}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-xs text-neutral-300 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs text-zinc-300 transition-colors"
             title="Diagnóstico de IP y Red Wi-Fi"
           >
-            <Activity className="w-3.5 h-3.5 text-neutral-400" />
+            <Activity className="w-3.5 h-3.5 text-zinc-400" />
             <span className="font-mono text-[11px] hidden md:inline">{device?.ip || 'IP / Red'}</span>
+          </button>
+
+          {/* Bitrise APK Button */}
+          <button
+            onClick={onOpenBitrise}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/50 border border-purple-800/60 rounded-xl text-xs text-purple-300 transition-colors shadow-sm"
+            title="Generar APK Android con Bitrise"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-purple-400" />
+            <span className="font-medium text-[11px]">APK Bitrise</span>
           </button>
         </div>
 
         {/* Minimal Mode Switcher */}
-        <div className="flex items-center gap-1 p-1 bg-neutral-900 rounded-xl border border-neutral-800">
+        <div className="flex items-center gap-1 p-1 bg-zinc-900 rounded-xl border border-zinc-800">
           {tabs.map(tab => {
             const IconComp = tab.icon;
             const isSelected = currentMode === tab.id;
@@ -115,8 +127,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                   isSelected
-                    ? 'bg-neutral-800 text-neutral-100 shadow-sm'
-                    : 'text-neutral-400 hover:text-neutral-200'
+                    ? 'bg-zinc-800 text-zinc-100 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 <IconComp className="w-3.5 h-3.5" />
@@ -135,17 +147,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               soundFX.playSuccess();
               onOpenPairing();
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 rounded-xl text-xs font-medium transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-xl text-xs font-medium transition-colors"
             title="Sincronizar Inicio + OK a ~1m"
           >
-            <Radio className="w-3.5 h-3.5 text-neutral-400" />
+            <Radio className="w-3.5 h-3.5 text-zinc-400" />
             <span className="hidden md:inline">Sincronizar (1m)</span>
           </button>
 
           {/* Fullscreen */}
           <button
             onClick={onToggleFullscreen}
-            className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 transition-colors"
+            className="p-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors"
             title="Pantalla Completa"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -156,8 +168,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={onToggleSimulator}
             className={`p-1.5 rounded-xl border transition-colors ${
               showSimulator
-                ? 'bg-neutral-800 text-neutral-200 border-neutral-700'
-                : 'bg-neutral-950 text-neutral-600 border-neutral-900'
+                ? 'bg-zinc-800 text-zinc-200 border-zinc-700'
+                : 'bg-zinc-950 text-zinc-600 border-zinc-900'
             }`}
             title="Mostrar/Ocultar Pantalla TV"
           >
@@ -167,7 +179,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Sound */}
           <button
             onClick={onToggleSound}
-            className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 border border-neutral-800 transition-colors"
+            className="p-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800 transition-colors"
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
@@ -176,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onToggleHaptics}
             className={`p-1.5 rounded-xl border transition-colors ${
-              hapticsEnabled ? 'text-neutral-300 border-neutral-800 bg-neutral-900' : 'text-neutral-600 border-neutral-900 bg-neutral-950'
+              hapticsEnabled ? 'text-zinc-300 border-zinc-800 bg-zinc-900' : 'text-zinc-600 border-zinc-900 bg-zinc-950'
             }`}
           >
             <Vibrate className="w-4 h-4" />

@@ -1,0 +1,30 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.tclgamepulse.remote',
+  appName: 'TCL GamePulse Mando',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'http',
+    cleartext: true,
+    allowNavigation: [
+      '192.168.*',
+      '10.*',
+      '172.*',
+      'localhost',
+      '*'
+    ],
+  },
+  android: {
+    allowMixedContent: true,
+    captureInput: true,
+    webContentsDebuggingEnabled: true,
+    backgroundColor: '#09090b',
+  },
+  plugins: {
+    Haptics: {},
+    Network: {},
+  },
+};
+
+export default config;
