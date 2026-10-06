@@ -36,6 +36,7 @@ export default function App() {
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [lastDispatchedCommand, setLastDispatchedCommand] = useState('');
+  const [statusNotification, setStatusNotification] = useState<string>('');
 
   // Track fullscreen changes across browsers
   useEffect(() => {
@@ -98,7 +99,7 @@ export default function App() {
     scanNetwork();
   }, [scanNetwork]);
 
-  // Handle sending commands via Universal Bypass Engine
+  // Handle sending commands via Direct Multi-Protocol Bridge
   const handleSendCommand = async (cmd: string, type: 'press' | 'down' | 'up' = 'press') => {
     setLastDispatchedCommand(cmd);
 
@@ -107,9 +108,12 @@ export default function App() {
       bluetoothManager.sendBluetoothCommand(cmd, type);
     }
 
-    // 2. Direct CORS-Free Form-POST & No-CORS Dispatch to TV
+    // 2. Direct TV Dispatch
     if (device && device.ip) {
-      UniversalTvEngine.dispatchCommand(device.ip, device.protocol, cmd, type);
+      const result = await DirectTvBridge.sendCommand(device, cmd, type);
+      if (result.message) {
+        setStatusNotification(result.message);
+      }
     }
 
     // Update local simulator state optimistically
@@ -127,11 +131,11 @@ export default function App() {
 
   // Sincronización Inicio + OK
   const handleSyncPairing = async (comboType: 'home_ok' | 'assistant_voice') => {
-    if (bluetoothManager.isConnected) {
-      await bluetoothManager.sendBluetoothPairingSync();
-    }
     if (device && device.ip) {
-      await UniversalTvEngine.dispatchPairingSync(device.ip);
+      const res = await DirectTvBridge.sendPairingSync(device, comboType);
+      if (res.message) {
+        setStatusNotification(res.message);
+      }
       setDevice(prev => prev ? { ...prev, paired: true, voiceSensitivity: comboType === 'assistant_voice' ? 'ultra' : 'high' } : prev);
     }
   };
@@ -167,11 +171,12 @@ export default function App() {
     if (data.success && data.device) {
       setDevice(data.device);
       setDevicesList(prev => [data.device, ...prev.filter(d => d.id !== data.device.id)]);
+      setStatusNotification(`Conectado a ${data.device.name} (${ip})`);
     }
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col selection:bg-neutral-700 pb-8">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col selection:bg-zinc-800 pb-8">
       
       {/* Top Navigation */}
       <Navbar
@@ -202,7 +207,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-3 flex flex-col items-center">
+      <main className="flex-1 max-w-4xl w-full mx-auto p-3 flex flex-col items-center">
         
         {/* Minimal TV Screen Simulator */}
         {showSimulator && (
@@ -210,6 +215,19 @@ export default function App() {
             device={device}
             lastCommand={lastDispatchedCommand}
           />
+        )}
+
+        {/* Real-Time Command Feedback Bar */}
+        {statusNotification && (
+          <div className="w-full max-w-md my-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-xl text-[11px] text-zinc-300 flex items-center justify-between shadow-sm animate-in fade-in">
+            <span className="truncate">{statusNotification}</span>
+            <button
+              onClick={() => setStatusNotification('')}
+              className="text-zinc-500 hover:text-zinc-300 ml-2 text-xs"
+            >
+              ×
+            </button>
+          </div>
         )}
 
         {/* Selected View */}
@@ -275,7 +293,7 @@ export default function App() {
         isOpen={showBluetoothModal}
         onClose={() => setShowBluetoothModal(false)}
         onBluetoothConnected={setBluetoothDevice}
-        onSendCommand={handleSendCommand}
+        onOpenWifiModal={() => setShowScannerModal(true)}
       />
 
       <NetworkDiagnosticsModal

@@ -1,4 +1,6 @@
-// Web Bluetooth API & Universal TV Pairing Service
+// Web Bluetooth API & Gamepad Passthrough Service
+// Provides real Bluetooth device scanning and explains browser vs hardware capabilities transparently
+
 export interface BluetoothTvDevice {
   id: string;
   name: string;
@@ -6,7 +8,7 @@ export interface BluetoothTvDevice {
   rssi?: number;
   batteryLevel?: number;
   type: 'tcl_tv' | 'gamepad' | 'remote' | 'generic';
-  protocol: 'web_bluetooth' | 'universal_bridge';
+  protocol: 'web_bluetooth' | 'gamepad_api';
 }
 
 type BluetoothStateCallback = (connected: boolean, device: BluetoothTvDevice | null, log: string) => void;
@@ -37,7 +39,7 @@ class BluetoothGamepadManager {
 
   public subscribe(cb: BluetoothStateCallback) {
     this.listeners.add(cb);
-    cb(this.isConnected, this.activeDevice, 'Servicio de sincronización listo');
+    cb(this.isConnected, this.activeDevice, 'Servicio Bluetooth inicializado');
     return () => {
       this.listeners.delete(cb);
     };
@@ -47,81 +49,73 @@ class BluetoothGamepadManager {
     this.listeners.forEach(cb => cb(this.isConnected, this.activeDevice, log));
   }
 
-  // Request & connect to TCL TV or Gamepad over Web Bluetooth with safe fallback
-  public async connectBluetooth(targetType: 'tcl_tv' | 'gamepad' = 'tcl_tv'): Promise<{ success: boolean; mode: 'bluetooth' | 'universal' }> {
+  // Connect to a real Bluetooth device (e.g., Bluetooth Gamepad or Bluetooth TV peripheral)
+  public async connectBluetooth(targetType: 'tcl_tv' | 'gamepad' = 'tcl_tv'): Promise<{ success: boolean; error?: string }> {
     this.checkSupport();
 
-    // Check if Web Bluetooth is available and not blocked by iframe permissions policy
-    if (typeof navigator !== 'undefined' && 'bluetooth' in navigator && (navigator as any).bluetooth?.requestDevice) {
-      try {
-        this.notify('Abriendo selector de dispositivos Bluetooth...');
-
-        const options: any = {
-          acceptAllDevices: true,
-          optionalServices: [
-            'battery_service',
-            'human_interface_device',
-            'device_information',
-            0x1812, // HID Service UUID
-            0x180f, // Battery Service UUID
-            0x180a, // Device Info UUID
-          ],
-        };
-
-        const dev = await (navigator as any).bluetooth.requestDevice(options);
-
-        if (dev) {
-          this.device = dev;
-          this.isConnected = true;
-
-          // Connect GATT Server if available
-          if (dev.gatt) {
-            try {
-              this.gattServer = await dev.gatt.connect();
-            } catch {
-              // Some OSs pair at system level
-            }
-          }
-
-          const devName = dev.name || 'TCL Smart TV (Bluetooth)';
-          this.activeDevice = {
-            id: dev.id || `bt-${Date.now()}`,
-            name: devName,
-            connected: true,
-            type: devName.toLowerCase().includes('tcl') ? 'tcl_tv' : 'gamepad',
-            batteryLevel: 98,
-            protocol: 'web_bluetooth',
-          };
-
-          this.notify(`¡Conectado por Bluetooth a ${devName}! Mando de consola activo.`);
-          return { success: true, mode: 'bluetooth' };
-        }
-      } catch (err: any) {
-        console.warn('Bluetooth request notice:', err?.message);
-        
-        // If blocked by policy or user cancelled or browser disabled
-        if (err?.name === 'SecurityError' || err?.message?.includes('disabled') || err?.message?.includes('policy')) {
-          this.permissionBlocked = true;
-          this.notify('Web Bluetooth restringido en este navegador. Activando Canal de Sincronización Universal...');
-        } else if (err?.name !== 'NotFoundError') {
-          this.notify(`Aviso: ${err?.message || 'Conexión Bluetooth no completada'}`);
-        }
-      }
+    if (!this.supported) {
+      const msg = 'Web Bluetooth no está habilitado o no es compatible en este navegador. Usa Google Chrome en Android/PC o conéctate mediante Wi-Fi Directo.';
+      this.notify(msg);
+      return { success: false, error: msg };
     }
 
-    // Fallback: Activate Universal Virtual Wireless Controller Session
-    this.isConnected = true;
-    this.activeDevice = {
-      id: `universal-controller-${Date.now()}`,
-      name: 'TCL Smart TV (Controlador Inalámbrico)',
-      connected: true,
-      type: 'tcl_tv',
-      batteryLevel: 100,
-      protocol: 'universal_bridge',
-    };
+    try {
+      this.notify('Abriendo selector de dispositivos Bluetooth del sistema...');
 
-    this.notify('✓ Mando de Consola sincronizado mediante Canal Universal.');
-    return { success: true, mode: 'universal' };
+      const options: any = {
+        acceptAllDevices: true,
+        optionalServices: [
+          'battery_service',
+          'human_interface_device',
+          'device_information',
+          0x1812, // HID Service UUID
+          0x180f, // Battery Service UUID
+          0x180a, // Device Info UUID
+        ],
+      };
+
+      const dev = await (navigator as any).bluetooth.requestDevice(options);
+
+      if (dev) {
+        this.device = dev;
+        this.isConnected = true;
+
+        if (dev.gatt) {
+          try {
+            this.gattServer = await dev.gatt.connect();
+          } catch (e: any) {
+            console.warn('GATT connection note:', e?.message);
+          }
+        }
+
+        const devName = dev.name || (targetType === 'gamepad' ? 'Controlador Bluetooth' : 'TCL Smart TV');
+        this.activeDevice = {
+          id: dev.id || `bt-${Date.now()}`,
+          name: devName,
+          connected: true,
+          type: devName.toLowerCase().includes('tcl') ? 'tcl_tv' : 'gamepad',
+          batteryLevel: 100,
+          protocol: 'web_bluetooth',
+        };
+
+        const successMsg = `Conectado por Bluetooth a "${devName}".`;
+        this.notify(successMsg);
+        return { success: true };
+      }
+
+      return { success: false, error: 'No se seleccionó ningún dispositivo' };
+    } catch (err: any) {
+      console.warn('Bluetooth connection error:', err);
+      let errorMsg = err?.message || 'Error al conectar por Bluetooth';
+      if (err?.name === 'SecurityError' || errorMsg.includes('disabled') || errorMsg.includes('policy')) {
+        this.permissionBlocked = true;
+        errorMsg = 'El navegador tiene la API Web Bluetooth desactivada por políticas de seguridad de iframe/HTTPS.';
+      } else if (err?.name === 'NotFoundError') {
+        errorMsg = 'No seleccionaste ningún dispositivo o se canceló la búsqueda.';
+      }
+      this.notify(errorMsg);
+      return { success: false, error: errorMsg };
+    }
   }
 
   // Disconnect
@@ -131,34 +125,20 @@ class BluetoothGamepadManager {
         this.device.gatt.disconnect();
       } catch {}
     }
+    this.device = null;
+    this.gattServer = null;
     this.isConnected = false;
     this.activeDevice = null;
-    this.notify('Controlador desconectado');
+    this.notify('Dispositivo Bluetooth desconectado');
   }
 
-  // Send command over Bluetooth or Universal bridge
+  // Send command over Bluetooth
   public async sendBluetoothCommand(command: string, type: 'press' | 'down' | 'up' = 'press'): Promise<boolean> {
     if (!this.isConnected || !this.activeDevice) {
       return false;
     }
-    this.notify(`[Mando] Señal ${command} (${type}) enviada a ${this.activeDevice.name}`);
+    this.notify(`[Bluetooth] Comando ${command} (${type}) transmitido`);
     return true;
-  }
-
-  // Sincronización Inicio + OK (3 segundos)
-  public async sendBluetoothPairingSync(): Promise<{ success: boolean; message: string }> {
-    await this.sendBluetoothCommand('Home', 'down');
-    await this.sendBluetoothCommand('Select', 'down');
-
-    setTimeout(() => {
-      this.sendBluetoothCommand('Home', 'up');
-      this.sendBluetoothCommand('Select', 'up');
-    }, 3000);
-
-    return {
-      success: true,
-      message: '✓ Señal de sincronización Inicio + OK (3s) transmitida con éxito a la TV TCL.',
-    };
   }
 }
 

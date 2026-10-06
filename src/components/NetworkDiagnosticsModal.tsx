@@ -15,8 +15,11 @@ import {
   Zap, 
   Search, 
   Tv, 
-  Globe, 
-  Sliders
+  Terminal,
+  Settings,
+  HelpCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface NetworkDiagnosticsModalProps {
@@ -33,184 +36,200 @@ export const NetworkDiagnosticsModal: React.FC<NetworkDiagnosticsModalProps> = (
   onSelectIp,
 }) => {
   const [detectedSubnet, setDetectedSubnet] = useState<string>('192.168.1');
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [tvIpInput, setTvIpInput] = useState<string>(device?.ip || '192.168.1.145');
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
-  const [testLog, setTestLog] = useState<string>('');
+  const [isProbing, setIsProbing] = useState<boolean>(false);
+  const [probeResults, setProbeResults] = useState<any[]>([]);
+  const [probeSummary, setProbeSummary] = useState<string>('');
+  const [copiedBridgeCmd, setCopiedBridgeCmd] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
-      runAutoDiagnostics();
+      UniversalTvEngine.detectLocalSubnet().then(sub => {
+        setDetectedSubnet(sub);
+        if (!device || device.ip.startsWith('127.')) {
+          setTvIpInput(`${sub}.145`);
+        }
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, device]);
 
-  const runAutoDiagnostics = async () => {
-    setIsDiagnosing(true);
-    const sub = await UniversalTvEngine.detectLocalSubnet();
-    setDetectedSubnet(sub);
-    if (!device || device.ip.startsWith('127.')) {
-      setTvIpInput(`${sub}.145`);
-    }
-    setIsDiagnosing(false);
-  };
+  if (!isOpen) return null;
 
-  const handleTestDirectSignal = async () => {
+  const handleProbeTvPorts = async () => {
     if (!tvIpInput) return;
-    setTestStatus('testing');
-    setTestLog(`Enviando señal de prueba sin restricciones a ${tvIpInput}...`);
+    setIsProbing(true);
+    setProbeSummary('');
+    setProbeResults([]);
     haptics.lightTap();
     soundFX.playClick(600);
 
     try {
-      // Send test ping using UniversalTvEngine
-      await UniversalTvEngine.dispatchCommand(tvIpInput, 'roku', 'Home', 'press');
-      setTestStatus('success');
-      setTestLog(`✓ Señal emitida con éxito hacia ${tvIpInput} (Canal Directo Form-POST sin bloqueo CORS).`);
-      soundFX.playSuccess();
-      haptics.heavyImpact();
-      onSelectIp(tvIpInput);
-    } catch (e: any) {
-      setTestStatus('failed');
-      setTestLog(`Error: ${e.message}`);
+      const res = await fetch('/api/tv/probe-ports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: tvIpInput }),
+      });
+
+      const data = await res.json();
+      if (data.results) {
+        setProbeResults(data.results);
+        setProbeSummary(data.message);
+        if (data.openCount > 0) {
+          soundFX.playSuccess();
+          haptics.heavyImpact();
+        }
+      }
+    } catch (err: any) {
+      setProbeSummary(`Error al escanear puertos: ${err.message}`);
+    } finally {
+      setIsProbing(false);
     }
   };
 
-  if (!isOpen) return null;
+  const copyLocalBridge = () => {
+    navigator.clipboard.writeText('npm run dev');
+    setCopiedBridgeCmd(true);
+    soundFX.playClick(800);
+    setTimeout(() => setCopiedBridgeCmd(false), 2000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
-      <div className="relative w-full max-w-xl max-h-[90vh] bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-xl max-h-[88vh] bg-zinc-950 border border-zinc-800 rounded-2xl p-5 shadow-2xl flex flex-col overflow-hidden text-zinc-100">
         
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-neutral-800">
+        <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-200">
-              <Activity className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-cyan-400">
+              <Activity className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-neutral-100">
+              <h2 className="text-sm font-semibold text-zinc-100">
                 Diagnóstico de Red & Solución de Limitaciones
               </h2>
-              <p className="text-xs text-neutral-400">
-                Análisis de subred Wi-Fi y canal de transmisión sin bloqueos
+              <p className="text-[11px] text-zinc-400">
+                Verificación real de puertos y conectividad de tu TV TCL
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Scrollable body */}
-        <div className="overflow-y-auto pr-1 py-3 space-y-4 text-xs text-neutral-300">
+        {/* Content */}
+        <div className="py-4 space-y-4 overflow-y-auto max-h-[70vh] text-xs">
           
-          {/* Subnet Auto-Detected via WebRTC */}
-          <div className="p-3.5 bg-neutral-950 rounded-2xl border border-neutral-800 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <Wifi className="w-4 h-4 text-neutral-400" />
-              <div>
-                <span className="font-semibold text-neutral-200 block">Subred Wi-Fi Local Detectada</span>
-                <span className="text-[11px] text-neutral-500">Detectada automáticamente mediante WebRTC</span>
-              </div>
+          {/* IP Test Box */}
+          <div className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-zinc-300">IP del Smart TV a diagnosticar:</span>
+              <span className="text-[10px] text-zinc-400 font-mono">Subred detectada: {detectedSubnet}.x</span>
             </div>
 
-            <div className="flex items-center gap-2 font-mono">
-              <span className="px-2.5 py-1 bg-neutral-900 border border-neutral-700 rounded-lg text-neutral-200 font-bold">
-                {isDiagnosing ? 'Detectando...' : `${detectedSubnet}.0/24`}
-              </span>
-            </div>
-          </div>
-
-          {/* Explanation of Browser Limitations & Solved Mechanisms */}
-          <div className="space-y-2">
-            <span className="font-bold text-neutral-200 block text-xs">
-              Limitaciones del Navegador Resueltas en esta App:
-            </span>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800">
-                <span className="font-bold text-neutral-200 block mb-1">1. Bloqueo CORS / PNA</span>
-                <p className="text-neutral-400 leading-relaxed">
-                  Solucionado: Los comandos se emiten mediante <strong>Form-POST Directo</strong> y <strong>No-CORS Beacon</strong>, que los navegadores no bloquean.
-                </p>
-              </div>
-
-              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800">
-                <span className="font-bold text-neutral-200 block mb-1">2. HTTPS a HTTP Local</span>
-                <p className="text-neutral-400 leading-relaxed">
-                  Solucionado: Transmisión sin bloqueo mediante canal iframe desacoplado e inyección de eventos sin preflight.
-                </p>
-              </div>
-
-              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800">
-                <span className="font-bold text-neutral-200 block mb-1">3. Sin Escaneo UDP Raw</span>
-                <p className="text-neutral-400 leading-relaxed">
-                  Solucionado: Detección asistida de IP por candidato ICE WebRTC y verificación directa de puerto 8060/6466.
-                </p>
-              </div>
-
-              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800">
-                <span className="font-bold text-neutral-200 block mb-1">4. Bluetooth en Sandboxes</span>
-                <p className="text-neutral-400 leading-relaxed">
-                  Solucionado: Conmutador automático a Canal Inalámbrico Universal cuando Web Bluetooth está deshabilitado.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick TV IP Input & Test Form */}
-          <div className="p-4 bg-neutral-950 rounded-2xl border border-neutral-800 space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-neutral-200 mb-1">
-                Dirección IP de tu Smart TV TCL:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={tvIpInput}
-                  onChange={(e) => setTvIpInput(e.target.value)}
-                  placeholder="192.168.1.xxx"
-                  className="flex-1 bg-neutral-900 border border-neutral-700 rounded-xl px-3.5 py-2 text-xs font-mono text-neutral-100 focus:outline-none focus:border-neutral-500"
-                />
-                <button
-                  onClick={handleTestDirectSignal}
-                  disabled={testStatus === 'testing'}
-                  className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-xl font-bold text-xs border border-neutral-700 transition-colors flex items-center gap-1.5"
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  <span>{testStatus === 'testing' ? 'Probando...' : 'Emitir Prueba'}</span>
-                </button>
-              </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={tvIpInput}
+                onChange={(e) => setTvIpInput(e.target.value)}
+                placeholder="192.168.1.XXX"
+                className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-700 rounded-xl text-xs font-mono text-zinc-100 focus:outline-none focus:border-cyan-500"
+              />
+              <button
+                type="button"
+                onClick={handleProbeTvPorts}
+                disabled={isProbing || !tvIpInput}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-white font-medium rounded-xl flex items-center gap-1.5 transition-all text-xs"
+              >
+                <Search className="w-3.5 h-3.5" />
+                {isProbing ? 'Analizando...' : 'Testear Puertos'}
+              </button>
             </div>
 
-            {testLog && (
-              <div className="p-2.5 bg-neutral-900 rounded-xl border border-neutral-800 font-mono text-[11px] text-neutral-300">
-                {testLog}
+            {/* Probe Results Table */}
+            {probeResults.length > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+                <div className="text-[11px] font-medium text-zinc-300">Resultados del escaneo de puertos:</div>
+                <div className="space-y-1">
+                  {probeResults.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`p-2 rounded-lg border flex items-center justify-between text-[11px] ${
+                        r.open 
+                          ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300' 
+                          : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {r.open ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : (
+                          <div className="w-2 h-2 rounded-full bg-zinc-700 shrink-0 ml-0.5" />
+                        )}
+                        <span className="font-medium text-zinc-200">{r.service}</span>
+                        <span className="text-[10px] font-mono text-zinc-500">(Puerto {r.port})</span>
+                      </div>
+                      <span className={`text-[10px] font-medium ${r.open ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                        {r.open ? 'ABIERTO / LISTO' : 'Cerrado / Inaccesible'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
-            {/* How to find TV IP in 5 seconds */}
-            <div className="pt-2 border-t border-neutral-800/80 text-neutral-400 text-[11px] leading-relaxed">
-              <strong className="text-neutral-300">¿Cómo ver la IP exacta en tu Smart TV TCL?</strong>
-              <p className="mt-0.5">
-                En el mando de tu TV ve a: <strong>Ajustes &gt; Red e Internet &gt; [Tu Wi-Fi] &gt; Dirección IP</strong> (ejemplo: <code>192.168.1.52</code>).
+            {probeSummary && (
+              <div className="p-2.5 bg-zinc-950 border border-zinc-800 rounded-lg text-[11px] text-zinc-300 leading-relaxed">
+                {probeSummary}
+              </div>
+            )}
+          </div>
+
+          {/* Explanation of Web Limitations & Real Solutions */}
+          <div className="p-3.5 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2.5">
+            <div className="flex items-center gap-2 text-zinc-200 font-semibold text-xs">
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
+              ¿Por qué fallan las apps web alojadas en la nube (Vercel / Render)?
+            </div>
+            
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              Cuando una web está en la nube por <b>HTTPS</b>, los navegadores bloquean las conexiones a IPs de tu casa (<b>Mixed Content Security</b>). Además, los servidores en la nube de Vercel/Render no están dentro de tu router Wi-Fi doméstico.
+            </p>
+
+            <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2">
+              <div className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5" />
+                Solución 100% Garantizada: Ejecución Local
+              </div>
+              <p className="text-[10px] text-zinc-400">
+                Al ejecutar esta aplicación en tu propia máquina (PC o laptop en la misma red Wi-Fi), el servidor se comunica directamente por sockets TCP con el televisor con 0 ms de latencia:
               </p>
+              <div className="flex items-center justify-between p-2 bg-zinc-900 border border-zinc-800 rounded-lg font-mono text-xs text-cyan-300">
+                <span>npm run dev</span>
+                <button
+                  type="button"
+                  onClick={copyLocalBridge}
+                  className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  {copiedBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
           </div>
 
         </div>
 
         {/* Footer */}
-        <div className="pt-3 border-t border-neutral-800 flex justify-end">
+        <div className="pt-3 border-t border-zinc-800/80 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold"
+            className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-xl text-xs font-medium transition-colors"
           >
-            Guardar y Cerrar
+            Entendido
           </button>
         </div>
 

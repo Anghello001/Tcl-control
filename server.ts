@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import net from 'net';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 
@@ -47,7 +48,7 @@ export interface TvDevice {
   pairingProgress?: number;
 }
 
-// Active connected & detected TCL TV devices
+// Active TV devices registry
 const simulatedTvState: Record<string, TvDevice> = {
   'tcl-c845-living': {
     id: 'tcl-c845-living',
@@ -70,67 +71,53 @@ const simulatedTvState: Record<string, TvDevice> = {
     paired: true,
     voiceSensitivity: 'high',
   },
-  'tcl-roku-series6': {
-    id: 'tcl-roku-series6',
-    name: 'TCL 55" 6-Series 4K QLED Roku TV',
-    model: 'TCL 55R635 Roku TV',
-    ip: '192.168.1.182',
-    port: 8060,
-    protocol: 'roku',
-    online: true,
-    powerState: 'on',
-    volume: 18,
-    muted: false,
-    currentApp: 'YouTube',
-    inputSource: 'Smart TV Home',
-    gameMode: true,
-    vrrEnabled: false,
-    refreshRate: '120Hz',
-    latencyMs: 8,
-    lastSeen: Date.now(),
-    paired: true,
-    voiceSensitivity: 'normal',
-  },
-  'tcl-c745-gaming': {
-    id: 'tcl-c745-gaming',
-    name: 'TCL 55" C745 144Hz Gaming TV',
-    model: 'TCL 55C745 QLED Game Master',
-    ip: '192.168.0.105',
-    port: 6466,
-    protocol: 'android_tv',
-    online: true,
-    powerState: 'on',
-    volume: 26,
-    muted: false,
-    currentApp: 'NVIDIA GeForce NOW',
-    inputSource: 'HDMI 2',
-    gameMode: true,
-    vrrEnabled: true,
-    refreshRate: '144Hz VRR',
-    latencyMs: 6,
-    lastSeen: Date.now(),
-    paired: false,
-    voiceSensitivity: 'normal',
-  },
 };
 
-// Available apps
-const defaultApps = [
-  { id: 'game-center', name: 'TCL Game Center', icon: 'Gamepad2', category: 'gaming', package: 'com.tcl.gamecenter' },
-  { id: 'geforce-now', name: 'NVIDIA GeForce NOW', icon: 'Gamepad', category: 'gaming', package: 'com.nvidia.geforcenow' },
-  { id: 'retroarch', name: 'RetroArch Arcade', icon: 'Joystick', category: 'gaming', package: 'com.retroarch' },
-  { id: 'xbox-cloud', name: 'Xbox Cloud Gaming', icon: 'Tv2', category: 'gaming', package: 'com.xbox.gamepass' },
-  { id: 'youtube', name: 'YouTube 4K', icon: 'PlaySquare', category: 'video', package: 'com.google.android.youtube.tv' },
-  { id: 'netflix', name: 'Netflix', icon: 'Film', category: 'video', package: 'com.netflix.ninja' },
-  { id: 'prime-video', name: 'Prime Video', icon: 'Tv', category: 'video', package: 'com.amazon.amazonvideo.livingroom' },
-  { id: 'disney-plus', name: 'Disney+', icon: 'Sparkles', category: 'video', package: 'com.disney.disneyplus' },
-  { id: 'twitch', name: 'Twitch TV', icon: 'Radio', category: 'streaming', package: 'tv.twitch.android.app' },
-  { id: 'spotify', name: 'Spotify Music', icon: 'Music', category: 'music', package: 'com.spotify.tv.android' },
-  { id: 'web-browser', name: 'TCL Browser', icon: 'Globe', category: 'tools', package: 'com.tcl.browser' },
-  { id: 'settings', name: 'Ajustes del TV', icon: 'Settings', category: 'system', package: 'com.android.tv.settings' },
-];
+// Helper: Test real TCP socket port connection
+function checkTcpPort(host: string, port: number, timeoutMs = 1200): Promise<{ port: number; open: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let isResolved = false;
 
-async function tryFetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 800): Promise<any> {
+    socket.setTimeout(timeoutMs);
+
+    socket.on('connect', () => {
+      if (!isResolved) {
+        isResolved = true;
+        socket.destroy();
+        resolve({ port, open: true });
+      }
+    });
+
+    socket.on('timeout', () => {
+      if (!isResolved) {
+        isResolved = true;
+        socket.destroy();
+        resolve({ port, open: false, error: 'Tiempo de espera agotado (Timeout)' });
+      }
+    });
+
+    socket.on('error', (err: any) => {
+      if (!isResolved) {
+        isResolved = true;
+        socket.destroy();
+        resolve({ port, open: false, error: err.code || err.message });
+      }
+    });
+
+    try {
+      socket.connect(port, host);
+    } catch (err: any) {
+      if (!isResolved) {
+        isResolved = true;
+        resolve({ port, open: false, error: err.message });
+      }
+    }
+  });
+}
+
+// Helper: Fetch with timeout
+async function tryFetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1200): Promise<any> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -143,7 +130,113 @@ async function tryFetchWithTimeout(url: string, options: RequestInit = {}, timeo
   }
 }
 
-// 1. API: Scan Wi-Fi / Local Network
+// 1. API: Real Port & Protocol Probe (Checks real ports 8060, 5555, 6466, 7983 on the TV IP)
+app.post('/api/tv/probe-ports', async (req: Request, res: Response) => {
+  const { ip } = req.body;
+  if (!ip) {
+    return res.status(400).json({ success: false, error: 'IP requerida' });
+  }
+
+  const portsToCheck = [
+    { port: 8060, name: 'Roku ECP (TCL Roku TV)' },
+    { port: 5555, name: 'ADB Debugging (TCL Android / Google TV)' },
+    { port: 6466, name: 'Android TV Remote Control' },
+    { port: 7983, name: 'TCL T-Cast / MagiConnect' },
+    { port: 8008, name: 'DIAL / Cast' },
+  ];
+
+  const results = await Promise.all(
+    portsToCheck.map(async p => {
+      const check = await checkTcpPort(ip, p.port, 1200);
+      return {
+        port: p.port,
+        service: p.name,
+        open: check.open,
+        error: check.error,
+      };
+    })
+  );
+
+  const openPorts = results.filter(r => r.open);
+  let recommendedProtocol: 'roku' | 'android_tv' | 'tcl_tcast' = 'android_tv';
+  if (openPorts.some(p => p.port === 8060)) {
+    recommendedProtocol = 'roku';
+  } else if (openPorts.some(p => p.port === 5555 || p.port === 6466)) {
+    recommendedProtocol = 'android_tv';
+  } else if (openPorts.some(p => p.port === 7983)) {
+    recommendedProtocol = 'tcl_tcast';
+  }
+
+  res.json({
+    success: true,
+    ip,
+    results,
+    openCount: openPorts.length,
+    recommendedProtocol,
+    message: openPorts.length > 0 
+      ? `Se detectaron ${openPorts.length} puertos abiertos en ${ip}. Protocolo recomendado: ${recommendedProtocol.toUpperCase()}`
+      : `No se pudo conectar a los puertos estándar en ${ip}. Verifica que el TV esté encendido y que el acceso a red esté permitido.`,
+  });
+});
+
+// 2. API: Send Real Hardware TV Command (Returns exact HTTP & Socket status)
+app.post('/api/tv/command', async (req: Request, res: Response) => {
+  const { deviceId, tvIp, command, type = 'press' } = req.body;
+  const ip = tvIp || (simulatedTvState[deviceId] ? simulatedTvState[deviceId].ip : null);
+
+  let realSent = false;
+  let httpStatus: number | null = null;
+  let realError: string | null = null;
+  let rawResponse: string | null = null;
+
+  if (ip && !ip.startsWith('127.0.0.1')) {
+    const action = type === 'down' ? 'keydown' : (type === 'up' ? 'keyup' : 'keypress');
+    const rokuKey = mapToRokuKey(command);
+
+    // Try Roku ECP HTTP
+    if (rokuKey) {
+      try {
+        const response = await tryFetchWithTimeout(`http://${ip}:8060/${action}/${rokuKey}`, {
+          method: 'POST',
+        }, 1200);
+        httpStatus = response.status;
+        realSent = response.ok;
+        rawResponse = await response.text().catch(() => '');
+      } catch (err: any) {
+        realError = err.message || err.code || 'Error de conexión HTTP';
+      }
+    }
+  }
+
+  // Update in-memory state
+  const dev = simulatedTvState[deviceId] || Object.values(simulatedTvState)[0];
+  if (dev) {
+    if (command === 'VolumeUp') {
+      dev.volume = Math.min(100, dev.volume + 2);
+      dev.muted = false;
+    } else if (command === 'VolumeDown') {
+      dev.volume = Math.max(0, dev.volume - 2);
+    } else if (command === 'VolumeMute') {
+      dev.muted = !dev.muted;
+    } else if (command === 'Power') {
+      dev.powerState = dev.powerState === 'on' ? 'standby' : 'on';
+    }
+  }
+
+  res.json({
+    success: true,
+    command,
+    type,
+    ip,
+    realSent,
+    httpStatus,
+    realError,
+    rawResponse,
+    timestamp: Date.now(),
+  });
+});
+
+// 3. API: Scan Wi-Fi / Local Network
 app.get('/api/tv/scan', async (req: Request, res: Response) => {
   const customSubnet = req.query.subnet as string || '192.168.1';
   const targetIp = req.query.ip as string;
@@ -153,7 +246,6 @@ app.get('/api/tv/scan', async (req: Request, res: Response) => {
     detectedDevices.push({
       ...dev,
       lastSeen: Date.now(),
-      latencyMs: Math.floor(Math.random() * 5) + 4,
     });
   });
 
@@ -199,11 +291,10 @@ app.get('/api/tv/scan', async (req: Request, res: Response) => {
     devices: detectedDevices,
     timestamp: Date.now(),
     subnet: customSubnet,
-    message: `Detección completada: ${detectedDevices.length} televisores TCL listos`,
   });
 });
 
-// 2. API: Connect to TV
+// 4. API: Connect to TV
 app.post('/api/tv/connect', async (req: Request, res: Response) => {
   const { ip, port, protocol, name } = req.body;
   if (!ip) {
@@ -232,8 +323,8 @@ app.post('/api/tv/connect', async (req: Request, res: Response) => {
       refreshRate: '144Hz VRR',
       latencyMs: 5,
       lastSeen: Date.now(),
-      paired: false,
-      voiceSensitivity: 'normal',
+      paired: true,
+      voiceSensitivity: 'high',
     };
     simulatedTvState[deviceId] = existing;
   } else {
@@ -244,182 +335,38 @@ app.post('/api/tv/connect', async (req: Request, res: Response) => {
   res.json({
     success: true,
     device: existing,
-    message: `Mando conectado con éxito a ${existing.name}`,
+    message: `Configurado ${existing.name} (${ip})`,
   });
 });
 
-// 3. API: Send Gamepad or Remote Command (Supports multi-command simultaneous bursts)
-app.post('/api/tv/command', async (req: Request, res: Response) => {
-  const { deviceId, command, commands, type = 'press' } = req.body;
-  const dev = simulatedTvState[deviceId] || Object.values(simulatedTvState)[0];
-
-  const commandList: string[] = commands || (command ? [command] : []);
-  let realSent = false;
-  let realError = null;
-
-  for (const cmd of commandList) {
-    if (dev && dev.protocol === 'roku' && dev.ip && !dev.ip.startsWith('127.0.0.1')) {
-      try {
-        const endpoint = type === 'down' ? 'keydown' : (type === 'up' ? 'keyup' : 'keypress');
-        const rokuKey = mapToRokuKey(cmd);
-        if (rokuKey) {
-          await tryFetchWithTimeout(`http://${dev.ip}:8060/${endpoint}/${rokuKey}`, {
-            method: 'POST',
-          }, 400);
-          realSent = true;
-        }
-      } catch (e: any) {
-        realError = e.message;
-      }
-    }
-
-    // Update state
-    if (dev) {
-      if (cmd === 'VolumeUp') {
-        dev.volume = Math.min(100, dev.volume + 2);
-        dev.muted = false;
-      } else if (cmd === 'VolumeDown') {
-        dev.volume = Math.max(0, dev.volume - 2);
-      } else if (cmd === 'VolumeMute') {
-        dev.muted = !dev.muted;
-      } else if (cmd === 'Power' || cmd === 'PowerOff' || cmd === 'PowerOn') {
-        dev.powerState = dev.powerState === 'on' ? 'standby' : 'on';
-      } else if (cmd === 'ToggleGameMode') {
-        dev.gameMode = !dev.gameMode;
-        dev.latencyMs = dev.gameMode ? 5 : 45;
-      } else if (cmd === 'ToggleVRR') {
-        dev.vrrEnabled = !dev.vrrEnabled;
-      } else if (cmd.startsWith('HDMI')) {
-        dev.inputSource = cmd;
-        dev.currentApp = `Entrada ${cmd}`;
-      }
-    }
-  }
-
-  res.json({
-    success: true,
-    commands: commandList,
-    type,
-    realSent,
-    realError,
-    tvState: dev,
-    timestamp: Date.now(),
-  });
-});
-
-// 4. API: TCL Pairing Combo Sync (Inicio + OK for 3-5s / Asistente + Voz for Sensitivity)
+// 5. API: Pair Sync
 app.post('/api/tv/pair-sync', async (req: Request, res: Response) => {
-  const { deviceId, comboType } = req.body;
-  const dev = simulatedTvState[deviceId] || Object.values(simulatedTvState)[0];
+  const { deviceId, tvIp, comboType } = req.body;
+  const ip = tvIp || (simulatedTvState[deviceId] ? simulatedTvState[deviceId].ip : null);
 
-  if (dev) {
-    if (comboType === 'home_ok') {
-      dev.paired = true;
-      dev.latencyMs = 4;
-    } else if (comboType === 'assistant_voice') {
-      dev.voiceSensitivity = 'ultra';
-      dev.paired = true;
-    }
-  }
+  let realSuccess = false;
+  let log = '';
 
-  res.json({
-    success: true,
-    comboType,
-    tvState: dev,
-    message: comboType === 'home_ok' 
-      ? '¡Sincronización INICIO + OK completada! Control remoto emparejado con éxito al Smart TV TCL.'
-      : '¡Calibración ASISTENTE + VOZ completada! Búsqueda por voz activada y sensibilidad aumentada al máximo.',
-  });
-});
-
-// 5. API: Apps & Launching
-app.get('/api/tv/apps', (req: Request, res: Response) => {
-  res.json({ success: true, apps: defaultApps });
-});
-
-app.post('/api/tv/launch-app', async (req: Request, res: Response) => {
-  const { deviceId, appId } = req.body;
-  const dev = simulatedTvState[deviceId] || Object.values(simulatedTvState)[0];
-  const targetApp = defaultApps.find(a => a.id === appId);
-
-  if (dev && targetApp) {
-    dev.currentApp = targetApp.name;
-    if (targetApp.category === 'gaming') {
-      dev.gameMode = true;
-      dev.latencyMs = 5;
-    }
-  }
-
-  if (dev && dev.protocol === 'roku' && dev.ip) {
-    const rokuAppMap: Record<string, string> = {
-      'youtube': '837',
-      'netflix': '12',
-      'prime-video': '13',
-      'spotify': '22271',
-    };
-    const rId = rokuAppMap[appId];
-    if (rId) {
-      try {
-        await tryFetchWithTimeout(`http://${dev.ip}:8060/launch/${rId}`, { method: 'POST' }, 800);
-      } catch {}
-    }
-  }
-
-  res.json({
-    success: true,
-    currentApp: targetApp ? targetApp.name : appId,
-    tvState: dev,
-  });
-});
-
-// 6. API: Virtual Keyboard text
-app.post('/api/tv/type-text', async (req: Request, res: Response) => {
-  const { deviceId, text } = req.body;
-  const dev = simulatedTvState[deviceId] || Object.values(simulatedTvState)[0];
-
-  if (dev && dev.protocol === 'roku' && dev.ip && text) {
+  if (ip && !ip.startsWith('127.0.0.1')) {
     try {
-      for (const char of text) {
-        await tryFetchWithTimeout(`http://${dev.ip}:8060/keypress/Lit_${encodeURIComponent(char)}`, { method: 'POST' }, 250);
+      if (comboType === 'home_ok') {
+        await tryFetchWithTimeout(`http://${ip}:8060/keypress/Home`, { method: 'POST' }, 800);
+        await tryFetchWithTimeout(`http://${ip}:8060/keypress/Select`, { method: 'POST' }, 800);
+        realSuccess = true;
+        log = `Comandos Inicio + OK enviados al TV en ${ip}:8060`;
       }
-    } catch {}
+    } catch (err: any) {
+      log = `Aviso de red: ${err.message}`;
+    }
   }
 
-  res.json({ success: true, typed: text });
-});
-
-// 7. API: AI Voice & Gamepad Optimizer
-app.post('/api/ai/game-tips', async (req: Request, res: Response) => {
-  const { query, mode, tvModel } = req.body;
-
-  try {
-    const prompt = `Eres el asistente de IA experto en televisores Smart TV TCL y sincronización de mandos a distancia y mandos de consola.
-El usuario pregunta o solicita:
-"${query}"
-
-Detalles técnicos a tener en cuenta:
-- Emparejamiento TCL: Mantener pulsados INICIO (Home) + OK simultáneamente durante 3-5 segundos a ~1 metro de distancia de la TV.
-- Activación de Voz & Sensibilidad: Mantener pulsado botón Asistente + botón de Voz para activar búsqueda por voz y sensibilidad máxima.
-
-Responde de forma concisa, útil y en español.`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-    });
-
-    res.json({
-      success: true,
-      text: response.text || 'Respuesta generada correctamente.',
-    });
-  } catch (error: any) {
-    res.json({
-      success: true,
-      text: `Para emparejar tu mando TCL:
-1. **Inicio + OK**: Mantén pulsados ambos botones simultáneamente durante 3 a 5 segundos a 1 metro de la TV.
-2. **Asistente + Voz**: Mantén pulsados el botón de Asistente y el de Voz para activar la búsqueda por voz y aumentar la sensibilidad del control remoto al máximo.`,
-    });
-  }
+  res.json({
+    success: true,
+    realSuccess,
+    comboType,
+    log,
+    message: 'Comando de sincronización procesado.',
+  });
 });
 
 function mapToRokuKey(cmd: string): string | null {
@@ -441,11 +388,8 @@ function mapToRokuKey(cmd: string): string | null {
     'Power': 'PowerOff',
     'Play': 'Play',
     'Pause': 'Play',
-    'PlayPause': 'Play',
     'Rev': 'Rev',
     'Fwd': 'Fwd',
-    'InstantReplay': 'InstantReplay',
-    'Info': 'Info',
     'Assistant': 'Search',
     'Voice': 'Search',
   };
@@ -465,7 +409,6 @@ async function startServer() {
       });
       app.use(vite.middlewares);
     } catch (e) {
-      console.warn('Vite dev server middleware warning:', e);
       app.use(express.static(distPath));
       app.get('*', (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
@@ -479,11 +422,10 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`TCL GamePulse Smart TV server running on http://0.0.0.0:${PORT} (Production: ${isProduction})`);
+    console.log(`TCL GamePulse server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-// Only start the HTTP listener if not running in a serverless environment (like Vercel)
 if (process.env.VERCEL !== '1' && !process.env.NOW_REGION) {
   startServer();
 }

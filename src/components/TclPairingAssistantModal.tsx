@@ -2,18 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TvDevice } from '../types.ts';
 import { soundFX } from '../services/soundEffects.ts';
 import { haptics } from '../services/haptics.ts';
+import { DirectTvBridge } from '../services/directTvBridge.ts';
 import { 
   Tv, 
-  Home, 
   CheckCircle2, 
-  Radio, 
-  Mic, 
-  Bot, 
+  AlertCircle, 
   X, 
   Zap, 
   Info,
-  ExternalLink,
-  Smartphone,
+  Sliders,
+  Terminal,
+  Activity,
+  Radio,
+  Settings,
   ShieldCheck
 } from 'lucide-react';
 
@@ -32,25 +33,28 @@ export const TclPairingAssistantModal: React.FC<TclPairingAssistantModalProps> =
   onSyncPairing,
   onSendCommand,
 }) => {
-  const [heldButtons, setHeldButtons] = useState<{ home: boolean; ok: boolean; assistant: boolean; voice: boolean }>({
+  const [heldButtons, setHeldButtons] = useState<{ home: boolean; ok: boolean }>({
     home: false,
     ok: false,
-    assistant: false,
-    voice: false,
   });
-
   const [holdTimer, setHoldTimer] = useState<number>(0);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'holding' | 'synced'>('idle');
-  const [activeStep, setActiveStep] = useState<1 | 2>(1);
-  const [isAutoSyncing, setIsAutoSyncing] = useState<boolean>(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<string>('');
+  const [isSending, setIsSending] = useState<boolean>(false);
+  const [dispatchResult, setDispatchResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [tvType, setTvType] = useState<'google_tv' | 'roku_tv'>('google_tv');
+  const [tvIpInput, setTvIpInput] = useState<string>(device?.ip || '192.168.1.145');
 
   const syncIntervalRef = useRef<any>(null);
 
-  // Simultaneous touch tracking
   useEffect(() => {
-    const isBothHeld = (activeStep === 1 && heldButtons.home && heldButtons.ok) ||
-                       (activeStep === 2 && heldButtons.assistant && heldButtons.voice);
+    if (device?.ip) {
+      setTvIpInput(device.ip);
+    }
+  }, [device]);
+
+  // Track simultaneous press of Inicio and OK
+  useEffect(() => {
+    const isBothHeld = heldButtons.home && heldButtons.ok;
 
     if (isBothHeld && syncStatus !== 'synced') {
       setSyncStatus('holding');
@@ -67,11 +71,11 @@ export const TclPairingAssistantModal: React.FC<TclPairingAssistantModalProps> =
           if (count >= 3000) {
             clearInterval(syncIntervalRef.current);
             syncIntervalRef.current = null;
-            completeSyncStep();
+            completeSync();
           }
         }, 100);
       }
-    } else if (!isBothHeld && !isAutoSyncing) {
+    } else if (!isBothHeld && !isSending) {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
         syncIntervalRef.current = null;
@@ -81,305 +85,297 @@ export const TclPairingAssistantModal: React.FC<TclPairingAssistantModalProps> =
         setHoldTimer(0);
       }
     }
-  }, [heldButtons, activeStep, syncStatus, isAutoSyncing]);
-
-  const completeSyncStep = async () => {
-    setSyncStatus('synced');
-    haptics.heavyImpact();
-    soundFX.playSuccess();
-
-    if (activeStep === 1) {
-      await onSyncPairing('home_ok');
-      setFeedbackMessage('✓ Emparejamiento INICIO + OK completado con éxito.');
-    } else {
-      await onSyncPairing('assistant_voice');
-      setFeedbackMessage('✓ Búsqueda por voz activada y sensibilidad calibrada al máximo.');
-    }
-  };
-
-  const handleAutoSync = async (type: 'home_ok' | 'assistant_voice') => {
-    setIsAutoSyncing(true);
-    setSyncStatus('holding');
-    setHoldTimer(0);
-    haptics.heavyImpact();
-    soundFX.playClick(600);
-
-    if (type === 'home_ok') {
-      onSendCommand('Home', 'down');
-      onSendCommand('Select', 'down');
-    } else {
-      onSendCommand('Assistant', 'down');
-      onSendCommand('Voice', 'down');
-    }
-
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 100;
-      setHoldTimer(progress);
-      haptics.lightTap();
-
-      if (progress >= 3000) {
-        clearInterval(interval);
-        if (type === 'home_ok') {
-          onSendCommand('Home', 'up');
-          onSendCommand('Select', 'up');
-        } else {
-          onSendCommand('Assistant', 'up');
-          onSendCommand('Voice', 'up');
-        }
-        setIsAutoSyncing(false);
-        completeSyncStep();
-      }
-    }, 100);
-  };
+  }, [heldButtons, syncStatus, isSending]);
 
   if (!isOpen) return null;
 
+  const completeSync = async () => {
+    setSyncStatus('synced');
+    haptics.heavyImpact();
+    soundFX.playSuccess();
+    await transmitSyncSignal();
+  };
+
+  const transmitSyncSignal = async () => {
+    setIsSending(true);
+    haptics.mediumImpact();
+    soundFX.playClick(600);
+
+    const targetDev: TvDevice = device || {
+      id: `tv-${tvIpInput}`,
+      name: 'TCL Smart TV',
+      model: 'TCL Smart TV',
+      ip: tvIpInput,
+      port: tvType === 'roku_tv' ? 8060 : 6466,
+      protocol: tvType === 'roku_tv' ? 'roku' : 'android_tv',
+      online: true,
+      powerState: 'on',
+      volume: 20,
+      muted: false,
+      currentApp: 'Home',
+      inputSource: 'HDMI 1',
+      gameMode: true,
+      vrrEnabled: true,
+      refreshRate: '120Hz',
+      latencyMs: 5,
+      lastSeen: Date.now(),
+    };
+
+    const res = await DirectTvBridge.sendPairingSync(targetDev, 'home_ok');
+    setDispatchResult(res);
+    setIsSending(false);
+    await onSyncPairing('home_ok');
+  };
+
+  // Quick command test (e.g. Volume) to verify if the TV actually received it
+  const handleQuickTest = async (cmd: string) => {
+    onSendCommand(cmd, 'press');
+    haptics.lightTap();
+    soundFX.playClick(800);
+    setDispatchResult({
+      success: true,
+      message: `Comando "${cmd}" transmitido a ${tvIpInput}. Comprueba si tu TV reaccionó.`,
+    });
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-      <div className="relative w-full max-w-lg bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
+      <div className="relative w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-2xl p-5 shadow-2xl flex flex-col overflow-hidden text-zinc-100">
         
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-neutral-800">
-          <div>
-            <h2 className="text-base font-bold text-neutral-100">
-              Sincronización de Control TCL
-            </h2>
-            <p className="text-xs text-neutral-400">
-              Emparejamiento de red a ~1 metro de la TV
-            </p>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* AI Studio & Local Wi-Fi clarification box */}
-        <div className="my-3 p-3 bg-neutral-950 rounded-2xl border border-neutral-800 text-xs text-neutral-300">
-          <div className="flex items-start gap-2">
-            <Info className="w-4 h-4 text-neutral-400 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              <strong className="text-neutral-200">¿Cómo sincronizar con tu TV real?</strong>
-              <p className="text-neutral-400 text-[11px] mt-0.5">
-                Para enviar comandos a tu TV física, abre esta misma web desde el navegador de tu móvil conectado a la <strong>misma red Wi-Fi</strong> de tu televisor.
+        <div className="flex items-center justify-between pb-3 border-b border-zinc-800/80">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-amber-400">
+              <Tv className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-100">
+                Sincronización TCL (Inicio + OK)
+              </h2>
+              <p className="text-[11px] text-zinc-400">
+                Instrucciones reales según el modelo de tu televisor
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Step Selector */}
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <button
-            onClick={() => {
-              setActiveStep(1);
-              setSyncStatus('idle');
-              setHoldTimer(0);
-              haptics.lightTap();
-            }}
-            className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all ${
-              activeStep === 1
-                ? 'bg-neutral-800 border-neutral-600 text-white'
-                : 'bg-neutral-950 border-neutral-800 text-neutral-400'
-            }`}
-          >
-            1. Inicio + OK (3s)
-          </button>
 
           <button
-            onClick={() => {
-              setActiveStep(2);
-              setSyncStatus('idle');
-              setHoldTimer(0);
-              haptics.lightTap();
-            }}
-            className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all ${
-              activeStep === 2
-                ? 'bg-neutral-800 border-neutral-600 text-white'
-                : 'bg-neutral-950 border-neutral-800 text-neutral-400'
-            }`}
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
           >
-            2. Asistente + Voz
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Main Hold Area */}
-        <div className="flex flex-col items-center gap-4 py-2">
+        {/* Content */}
+        <div className="py-4 space-y-4 overflow-y-auto max-h-[72vh] text-xs">
           
-          {/* Progress bar */}
-          <div className="w-full">
-            <div className="flex justify-between text-xs text-neutral-400 mb-1">
-              <span>{syncStatus === 'holding' ? 'Manteniendo señal...' : syncStatus === 'synced' ? '¡Completado!' : 'Mantén pulsados ambos botones:'}</span>
-              <span className="font-mono text-neutral-200">{(holdTimer / 1000).toFixed(1)}s / 3.0s</span>
+          {/* Diagnostic Note */}
+          <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl space-y-2">
+            <div className="flex items-center gap-2 text-zinc-200 font-medium">
+              <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>¿Por qué la pantalla de la TV pide "Inicio + OK"?</span>
             </div>
-            <div className="w-full h-2 bg-neutral-950 rounded-full overflow-hidden border border-neutral-800">
-              <div
-                className="h-full bg-neutral-300 rounded-full transition-all duration-100"
-                style={{ width: `${Math.min(100, (holdTimer / 3000) * 100)}%` }}
-              />
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              Ese mensaje en pantalla es para sincronizar el <b>mando de plástico original por radiofrecuencia/Bluetooth de fábrica</b>. Para controlar la TV desde esta Web App, se utiliza la <b>red Wi-Fi</b> (que no requiere el mando físico).
+            </p>
+          </div>
+
+          {/* TV Model Selector */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-medium text-zinc-400">Selecciona el Sistema de tu TV TCL:</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setTvType('google_tv')}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  tvType === 'google_tv'
+                    ? 'bg-zinc-900 border-cyan-500/80 text-zinc-100 shadow-sm'
+                    : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <div className="font-semibold text-xs">TCL Google TV / Android</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">Modelos C645, C745, C845, P635, P735...</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTvType('roku_tv')}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  tvType === 'roku_tv'
+                    ? 'bg-zinc-900 border-purple-500/80 text-zinc-100 shadow-sm'
+                    : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <div className="font-semibold text-xs">TCL Roku TV</div>
+                <div className="text-[10px] text-zinc-400 mt-0.5">Modelos con sistema operativo Roku OS</div>
+              </button>
             </div>
           </div>
 
-          {/* STEP 1: INICIO + OK */}
-          {activeStep === 1 && (
-            <div className="w-full flex flex-col items-center gap-4">
-              <div className="flex items-center justify-center gap-6 w-full py-2">
-                {/* INICIO */}
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                    setHeldButtons(prev => ({ ...prev, home: true }));
-                    onSendCommand('Home', 'down');
-                    haptics.lightTap();
-                  }}
-                  onPointerUp={(e) => {
-                    e.preventDefault();
-                    setHeldButtons(prev => ({ ...prev, home: false }));
-                    onSendCommand('Home', 'up');
-                  }}
-                  onPointerCancel={() => {
-                    setHeldButtons(prev => ({ ...prev, home: false }));
-                    onSendCommand('Home', 'up');
-                  }}
-                  className={`w-28 h-28 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all touch-none ${
-                    heldButtons.home ? 'bg-neutral-200 text-neutral-950 border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-200'
-                  }`}
-                >
-                  <Home className="w-6 h-6" />
-                  <span className="font-bold text-xs">INICIO</span>
-                </button>
-
-                <span className="text-xl font-bold text-neutral-500 font-mono">+</span>
-
-                {/* OK */}
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                    setHeldButtons(prev => ({ ...prev, ok: true }));
-                    onSendCommand('Select', 'down');
-                    haptics.lightTap();
-                  }}
-                  onPointerUp={(e) => {
-                    e.preventDefault();
-                    setHeldButtons(prev => ({ ...prev, ok: false }));
-                    onSendCommand('Select', 'up');
-                  }}
-                  onPointerCancel={() => {
-                    setHeldButtons(prev => ({ ...prev, ok: false }));
-                    onSendCommand('Select', 'up');
-                  }}
-                  className={`w-28 h-28 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all touch-none ${
-                    heldButtons.ok ? 'bg-neutral-200 text-neutral-950 border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-200'
-                  }`}
-                >
-                  <span className="font-bold text-lg font-mono">OK</span>
-                  <span className="font-bold text-xs">ACEPTAR</span>
-                </button>
+          {/* Model Specific Instructions */}
+          {tvType === 'google_tv' ? (
+            <div className="p-3 bg-cyan-950/20 border border-cyan-800/30 rounded-xl space-y-2">
+              <div className="flex items-center gap-1.5 text-cyan-300 font-semibold text-xs">
+                <Settings className="w-3.5 h-3.5" />
+                Pasos para TCL Google TV / Android TV:
               </div>
-
-              {/* Automated Sync Trigger */}
-              <button
-                onClick={() => handleAutoSync('home_ok')}
-                disabled={isAutoSyncing}
-                className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-2xl font-bold text-xs border border-neutral-700 transition-colors flex items-center justify-center gap-2"
-              >
-                <Zap className="w-4 h-4" />
-                <span>{isAutoSyncing ? 'Sincronizando señal (3s)...' : 'Sincronizar Automáticamente (Inicio + OK)'}</span>
-              </button>
+              <ol className="list-decimal list-inside text-[11px] text-zinc-300 space-y-1.5 pl-1 leading-relaxed">
+                <li>En tu TV, ve a <b>Ajustes &gt; Sistema &gt; Información</b>.</li>
+                <li>Pulsa <b>7 veces seguidas</b> en <b>Compilación del SO</b> para activar Opciones de Desarrollador.</li>
+                <li>Ve a <b>Ajustes &gt; Sistema &gt; Opciones de Desarrollador</b> y activa <b>Depuración de red (ADB)</b>.</li>
+                <li>Al enviar un comando desde esta web, aparecerá en tu TV un cuadro para <b>"Permitir siempre"</b>.</li>
+              </ol>
+            </div>
+          ) : (
+            <div className="p-3 bg-purple-950/20 border border-purple-800/30 rounded-xl space-y-2">
+              <div className="flex items-center gap-1.5 text-purple-300 font-semibold text-xs">
+                <Settings className="w-3.5 h-3.5" />
+                Pasos para TCL Roku TV:
+              </div>
+              <ol className="list-decimal list-inside text-[11px] text-zinc-300 space-y-1.5 pl-1 leading-relaxed">
+                <li>En tu TV, ve a <b>Configuración &gt; Sistema &gt; Configuración avanzada del sistema</b>.</li>
+                <li>Selecciona <b>Control mediante apps móviles</b>.</li>
+                <li>Cambia <b>Acceso a la red</b> a <b>Habilitado</b> o <b>Permisivo</b>.</li>
+                <li>¡Listo! Tu TV aceptará los comandos en milisegundos por el puerto 8060.</li>
+              </ol>
             </div>
           )}
 
-          {/* STEP 2: ASISTENTE + VOZ */}
-          {activeStep === 2 && (
-            <div className="w-full flex flex-col items-center gap-4">
-              <div className="flex items-center justify-center gap-6 w-full py-2">
-                {/* ASISTENTE */}
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                    setHeldButtons(prev => ({ ...prev, assistant: true }));
-                    onSendCommand('Assistant', 'down');
-                    haptics.lightTap();
-                  }}
-                  onPointerUp={(e) => {
-                    e.preventDefault();
-                    setHeldButtons(prev => ({ ...prev, assistant: false }));
-                    onSendCommand('Assistant', 'up');
-                  }}
-                  onPointerCancel={() => {
-                    setHeldButtons(prev => ({ ...prev, assistant: false }));
-                    onSendCommand('Assistant', 'up');
-                  }}
-                  className={`w-28 h-28 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all touch-none ${
-                    heldButtons.assistant ? 'bg-neutral-200 text-neutral-950 border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-200'
-                  }`}
-                >
-                  <Bot className="w-6 h-6" />
-                  <span className="font-bold text-xs">ASISTENTE</span>
-                </button>
+          {/* Target IP Input & Simultaneous Button Pad */}
+          <div className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-zinc-300">IP de tu TV en la red local:</span>
+              <input
+                type="text"
+                value={tvIpInput}
+                onChange={(e) => setTvIpInput(e.target.value)}
+                placeholder="192.168.1.XXX"
+                className="px-2.5 py-1 bg-zinc-950 border border-zinc-700 rounded-lg text-xs font-mono text-zinc-100 text-right w-36 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
 
-                <span className="text-xl font-bold text-neutral-500 font-mono">+</span>
+            <div className="text-[11px] text-zinc-400">
+              Mantén presionados los dos botones a la vez durante 3 segundos:
+            </div>
 
-                {/* VOZ */}
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                    setHeldButtons(prev => ({ ...prev, voice: true }));
-                    onSendCommand('Voice', 'down');
-                    haptics.lightTap();
-                  }}
-                  onPointerUp={(e) => {
-                    e.preventDefault();
-                    setHeldButtons(prev => ({ ...prev, voice: false }));
-                    onSendCommand('Voice', 'up');
-                  }}
-                  onPointerCancel={() => {
-                    setHeldButtons(prev => ({ ...prev, voice: false }));
-                    onSendCommand('Voice', 'up');
-                  }}
-                  className={`w-28 h-28 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all touch-none ${
-                    heldButtons.voice ? 'bg-neutral-200 text-neutral-950 border-white' : 'bg-neutral-950 border-neutral-800 text-neutral-200'
-                  }`}
-                >
-                  <Mic className="w-6 h-6" />
-                  <span className="font-bold text-xs">VOZ / MIC</span>
-                </button>
-              </div>
+            {/* Simultaneous Buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onMouseDown={() => setHeldButtons(prev => ({ ...prev, home: true }))}
+                onMouseUp={() => setHeldButtons(prev => ({ ...prev, home: false }))}
+                onTouchStart={() => setHeldButtons(prev => ({ ...prev, home: true }))}
+                onTouchEnd={() => setHeldButtons(prev => ({ ...prev, home: false }))}
+                className={`py-4 rounded-xl border flex flex-col items-center justify-center gap-1 font-semibold transition-all select-none ${
+                  heldButtons.home 
+                    ? 'bg-amber-500 text-zinc-950 border-amber-400 scale-95 shadow-inner' 
+                    : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-200'
+                }`}
+              >
+                <div className="text-base">🏠</div>
+                <span>INICIO (HOME)</span>
+                <span className="text-[9px] opacity-75">{heldButtons.home ? 'PULSADO' : 'MANTENER'}</span>
+              </button>
 
               <button
-                onClick={() => handleAutoSync('assistant_voice')}
-                disabled={isAutoSyncing}
-                className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-2xl font-bold text-xs border border-neutral-700 transition-colors flex items-center justify-center gap-2"
+                type="button"
+                onMouseDown={() => setHeldButtons(prev => ({ ...prev, ok: true }))}
+                onMouseUp={() => setHeldButtons(prev => ({ ...prev, ok: false }))}
+                onTouchStart={() => setHeldButtons(prev => ({ ...prev, ok: true }))}
+                onTouchEnd={() => setHeldButtons(prev => ({ ...prev, ok: false }))}
+                className={`py-4 rounded-xl border flex flex-col items-center justify-center gap-1 font-semibold transition-all select-none ${
+                  heldButtons.ok 
+                    ? 'bg-emerald-500 text-zinc-950 border-emerald-400 scale-95 shadow-inner' 
+                    : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-200'
+                }`}
               >
-                <Zap className="w-4 h-4" />
-                <span>{isAutoSyncing ? 'Calibrando sensibilidad (3s)...' : 'Calibrar Sensibilidad y Voz (3s)'}</span>
+                <div className="text-base">⭕</div>
+                <span>OK (SELECT)</span>
+                <span className="text-[9px] opacity-75">{heldButtons.ok ? 'PULSADO' : 'MANTENER'}</span>
               </button>
             </div>
-          )}
+
+            {/* Progress Bar */}
+            {syncStatus === 'holding' && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-zinc-400">
+                  <span>Transmitiendo señal continua...</span>
+                  <span className="font-mono font-bold text-amber-400">{(holdTimer / 1000).toFixed(1)}s / 3.0s</span>
+                </div>
+                <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-100"
+                    style={{ width: `${Math.min(100, (holdTimer / 3000) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Direct Send Button */}
+            <button
+              type="button"
+              onClick={transmitSyncSignal}
+              disabled={isSending}
+              className="w-full py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 border border-zinc-700 text-zinc-100 font-medium rounded-xl flex items-center justify-center gap-2 transition-all"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              {isSending ? 'Transmitiendo a la TV...' : 'Enviar Señal Inicio + OK Directa'}
+            </button>
+          </div>
+
+          {/* Quick Hardware Confirmation Test */}
+          <div className="p-3 bg-zinc-900/70 border border-zinc-800/80 rounded-xl space-y-2">
+            <span className="text-[11px] font-medium text-zinc-400">Prueba rápida de respuesta del televisor:</span>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleQuickTest('VolumeUp')}
+                className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-[11px] font-medium"
+              >
+                Volumen +
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickTest('VolumeDown')}
+                className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-[11px] font-medium"
+              >
+                Volumen -
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickTest('Home')}
+                className="py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-[11px] font-medium"
+              >
+                Menú Inicio
+              </button>
+            </div>
+          </div>
 
           {/* Feedback message */}
-          {feedbackMessage && (
-            <div className="w-full p-3 rounded-xl bg-neutral-950 border border-neutral-800 text-xs text-neutral-200 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{feedbackMessage}</span>
+          {dispatchResult && (
+            <div className={`p-3 rounded-xl border text-[11px] flex items-start gap-2 ${
+              dispatchResult.success 
+                ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300' 
+                : 'bg-red-950/20 border-red-500/40 text-red-300'
+            }`}>
+              {dispatchResult.success ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
+              )}
+              <span className="leading-relaxed">{dispatchResult.message}</span>
             </div>
           )}
 
         </div>
 
-        <div className="pt-3 border-t border-neutral-800 flex justify-end">
+        {/* Footer */}
+        <div className="pt-3 border-t border-zinc-800/80 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold"
+            className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded-xl text-xs font-medium transition-colors"
           >
-            Listo
+            Cerrar
           </button>
         </div>
 
