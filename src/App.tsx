@@ -12,18 +12,22 @@ import { AppLauncher } from './components/AppLauncher.tsx';
 import { TclTvSimulator } from './components/TclTvSimulator.tsx';
 import { NetworkScannerModal } from './components/NetworkScannerModal.tsx';
 import { TclPairingAssistantModal } from './components/TclPairingAssistantModal.tsx';
+import { BluetoothPairingModal } from './components/BluetoothPairingModal.tsx';
 import { soundFX } from './services/soundEffects.ts';
 import { haptics } from './services/haptics.ts';
 import { FullscreenManager } from './services/fullscreenService.ts';
 import { DirectTvBridge } from './services/directTvBridge.ts';
+import { BluetoothTvDevice, bluetoothManager } from './services/bluetoothGamepadService.ts';
 
 export default function App() {
   const [currentMode, setCurrentMode] = useState<ControllerMode>('gamepad');
   const [device, setDevice] = useState<TvDevice | null>(null);
+  const [bluetoothDevice, setBluetoothDevice] = useState<BluetoothTvDevice | null>(null);
   const [devicesList, setDevicesList] = useState<TvDevice[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [showPairingModal, setShowPairingModal] = useState(false);
+  const [showBluetoothModal, setShowBluetoothModal] = useState(false);
   const [showSimulator, setShowSimulator] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
@@ -54,6 +58,14 @@ export default function App() {
     setIsFullscreen(FullscreenManager.isFullscreen());
   };
 
+  // Subscribe to Bluetooth state
+  useEffect(() => {
+    const unsub = bluetoothManager.subscribe((connected, dev) => {
+      setBluetoothDevice(dev);
+    });
+    return () => unsub();
+  }, []);
+
   // Scan network
   const scanNetwork = useCallback(async (subnet = '192.168.1', targetIp?: string) => {
     setIsScanning(true);
@@ -82,10 +94,16 @@ export default function App() {
     scanNetwork();
   }, [scanNetwork]);
 
-  // Send commands using Direct LAN Bridge + fallback proxy
+  // Send commands using Bluetooth (if connected) or Direct LAN Bridge / Proxy
   const handleSendCommand = async (cmd: string, type: 'press' | 'down' | 'up' = 'press') => {
     setLastDispatchedCommand(cmd);
 
+    // 1. If Bluetooth is active, transmit over Bluetooth HID
+    if (bluetoothManager.isConnected) {
+      bluetoothManager.sendBluetoothCommand(cmd, type);
+    }
+
+    // 2. Transmit over Local Wi-Fi Bridge
     if (device) {
       DirectTvBridge.sendDirectCommand(device, cmd, type);
     }
@@ -105,6 +123,9 @@ export default function App() {
 
   // Sincronización Inicio + OK
   const handleSyncPairing = async (comboType: 'home_ok' | 'assistant_voice') => {
+    if (bluetoothManager.isConnected) {
+      await bluetoothManager.sendBluetoothPairingSync();
+    }
     if (device) {
       const result = await DirectTvBridge.sendPairingSyncDirect(device, comboType);
       if (result.success) {
@@ -155,8 +176,10 @@ export default function App() {
         currentMode={currentMode}
         onSelectMode={setCurrentMode}
         device={device}
+        bluetoothDevice={bluetoothDevice}
         onOpenScanner={() => setShowScannerModal(true)}
         onOpenPairing={() => setShowPairingModal(true)}
+        onOpenBluetooth={() => setShowBluetoothModal(true)}
         showSimulator={showSimulator}
         onToggleSimulator={() => setShowSimulator(!showSimulator)}
         soundEnabled={soundEnabled}
@@ -242,6 +265,13 @@ export default function App() {
         onClose={() => setShowPairingModal(false)}
         device={device}
         onSyncPairing={handleSyncPairing}
+        onSendCommand={handleSendCommand}
+      />
+
+      <BluetoothPairingModal
+        isOpen={showBluetoothModal}
+        onClose={() => setShowBluetoothModal(false)}
+        onBluetoothConnected={setBluetoothDevice}
         onSendCommand={handleSendCommand}
       />
 
