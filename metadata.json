@@ -1,0 +1,8 @@
+{
+  "name": "TCL GamePulse - Mando de Consola & Smart TV Hub",
+  "description": "Controlador de consola virtual y mando a distancia Wi-Fi para Smart TV TCL con emulación de gamepad, joystick analógico, hápticos y detección de red.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
