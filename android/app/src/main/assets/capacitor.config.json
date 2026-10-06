@@ -1,0 +1,9 @@
+{
+	"appId": "com.tclgamepulse.remote",
+	"appName": "TCL GamePulse",
+	"webDir": "public",
+	"server": {
+		"androidScheme": "http",
+		"cleartext": true
+	}
+}

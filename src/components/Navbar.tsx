@@ -100,14 +100,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="font-mono text-[11px] hidden md:inline">{device?.ip || 'IP / Red'}</span>
           </button>
 
-          {/* Bitrise APK Button */}
+          {/* AIDE / APK Generator Button */}
           <button
             onClick={onOpenBitrise}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-950/40 hover:bg-purple-900/50 border border-purple-800/60 rounded-xl text-xs text-purple-300 transition-colors shadow-sm"
-            title="Generar APK Android con Bitrise"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-800/60 rounded-xl text-xs text-emerald-300 transition-colors shadow-sm"
+            title="Compilar APK en tu celular con AIDE"
           >
-            <Smartphone className="w-3.5 h-3.5 text-purple-400" />
-            <span className="font-medium text-[11px]">APK Bitrise</span>
+            <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="font-medium text-[11px]">APK (AIDE)</span>
           </button>
         </div>
 
