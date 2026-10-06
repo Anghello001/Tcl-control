@@ -1,9 +1,26 @@
 {
 	"appId": "com.tclgamepulse.remote",
-	"appName": "TCL GamePulse",
-	"webDir": "public",
+	"appName": "TCL GamePulse Mando",
+	"webDir": "dist",
 	"server": {
 		"androidScheme": "http",
-		"cleartext": true
+		"cleartext": true,
+		"allowNavigation": [
+			"192.168.*",
+			"10.*",
+			"172.*",
+			"localhost",
+			"*"
+		]
+	},
+	"android": {
+		"allowMixedContent": true,
+		"captureInput": true,
+		"webContentsDebuggingEnabled": true,
+		"backgroundColor": "#09090b"
+	},
+	"plugins": {
+		"Haptics": {},
+		"Network": {}
 	}
 }
