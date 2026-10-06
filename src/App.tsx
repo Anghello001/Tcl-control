@@ -13,9 +13,11 @@ import { TclTvSimulator } from './components/TclTvSimulator.tsx';
 import { NetworkScannerModal } from './components/NetworkScannerModal.tsx';
 import { TclPairingAssistantModal } from './components/TclPairingAssistantModal.tsx';
 import { BluetoothPairingModal } from './components/BluetoothPairingModal.tsx';
+import { NetworkDiagnosticsModal } from './components/NetworkDiagnosticsModal.tsx';
 import { soundFX } from './services/soundEffects.ts';
 import { haptics } from './services/haptics.ts';
 import { FullscreenManager } from './services/fullscreenService.ts';
+import { UniversalTvEngine } from './services/universalTvEngine.ts';
 import { DirectTvBridge } from './services/directTvBridge.ts';
 import { BluetoothTvDevice, bluetoothManager } from './services/bluetoothGamepadService.ts';
 
@@ -28,6 +30,7 @@ export default function App() {
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [showPairingModal, setShowPairingModal] = useState(false);
   const [showBluetoothModal, setShowBluetoothModal] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
   const [showSimulator, setShowSimulator] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [hapticsEnabled, setHapticsEnabled] = useState(true);
@@ -66,13 +69,14 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Scan network
-  const scanNetwork = useCallback(async (subnet = '192.168.1', targetIp?: string) => {
+  // Scan network & detect real local subnet
+  const scanNetwork = useCallback(async (subnet?: string, targetIp?: string) => {
     setIsScanning(true);
     try {
+      const activeSubnet = subnet || await UniversalTvEngine.detectLocalSubnet();
       const url = targetIp 
-        ? `/api/tv/scan?subnet=${encodeURIComponent(subnet)}&ip=${encodeURIComponent(targetIp)}`
-        : `/api/tv/scan?subnet=${encodeURIComponent(subnet)}`;
+        ? `/api/tv/scan?subnet=${encodeURIComponent(activeSubnet)}&ip=${encodeURIComponent(targetIp)}`
+        : `/api/tv/scan?subnet=${encodeURIComponent(activeSubnet)}`;
 
       const res = await fetch(url);
       const data = await res.json();
@@ -94,21 +98,21 @@ export default function App() {
     scanNetwork();
   }, [scanNetwork]);
 
-  // Send commands using Bluetooth (if connected) or Direct LAN Bridge / Proxy
+  // Handle sending commands via Universal Bypass Engine
   const handleSendCommand = async (cmd: string, type: 'press' | 'down' | 'up' = 'press') => {
     setLastDispatchedCommand(cmd);
 
-    // 1. If Bluetooth is active, transmit over Bluetooth HID
+    // 1. Bluetooth Dispatch if active
     if (bluetoothManager.isConnected) {
       bluetoothManager.sendBluetoothCommand(cmd, type);
     }
 
-    // 2. Transmit over Local Wi-Fi Bridge
-    if (device) {
-      DirectTvBridge.sendDirectCommand(device, cmd, type);
+    // 2. Direct CORS-Free Form-POST & No-CORS Dispatch to TV
+    if (device && device.ip) {
+      UniversalTvEngine.dispatchCommand(device.ip, device.protocol, cmd, type);
     }
 
-    // Update local state optimistically
+    // Update local simulator state optimistically
     setDevice(prev => {
       if (!prev) return prev;
       if (cmd === 'VolumeUp') return { ...prev, volume: Math.min(100, prev.volume + 2), muted: false };
@@ -126,11 +130,9 @@ export default function App() {
     if (bluetoothManager.isConnected) {
       await bluetoothManager.sendBluetoothPairingSync();
     }
-    if (device) {
-      const result = await DirectTvBridge.sendPairingSyncDirect(device, comboType);
-      if (result.success) {
-        setDevice(prev => prev ? { ...prev, paired: true, voiceSensitivity: comboType === 'assistant_voice' ? 'ultra' : 'high' } : prev);
-      }
+    if (device && device.ip) {
+      await UniversalTvEngine.dispatchPairingSync(device.ip);
+      setDevice(prev => prev ? { ...prev, paired: true, voiceSensitivity: comboType === 'assistant_voice' ? 'ultra' : 'high' } : prev);
     }
   };
 
@@ -180,6 +182,7 @@ export default function App() {
         onOpenScanner={() => setShowScannerModal(true)}
         onOpenPairing={() => setShowPairingModal(true)}
         onOpenBluetooth={() => setShowBluetoothModal(true)}
+        onOpenDiagnostics={() => setShowDiagnosticsModal(true)}
         showSimulator={showSimulator}
         onToggleSimulator={() => setShowSimulator(!showSimulator)}
         soundEnabled={soundEnabled}
@@ -273,6 +276,17 @@ export default function App() {
         onClose={() => setShowBluetoothModal(false)}
         onBluetoothConnected={setBluetoothDevice}
         onSendCommand={handleSendCommand}
+      />
+
+      <NetworkDiagnosticsModal
+        isOpen={showDiagnosticsModal}
+        onClose={() => setShowDiagnosticsModal(false)}
+        device={device}
+        onSelectIp={(newIp) => {
+          if (device) {
+            setDevice({ ...device, ip: newIp });
+          }
+        }}
       />
 
     </div>

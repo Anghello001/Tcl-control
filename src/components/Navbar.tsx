@@ -16,6 +16,7 @@ import {
   Minimize2,
   Radio,
   Bluetooth,
+  Activity,
   Search
 } from 'lucide-react';
 
@@ -27,6 +28,7 @@ interface NavbarProps {
   onOpenScanner: () => void;
   onOpenPairing: () => void;
   onOpenBluetooth: () => void;
+  onOpenDiagnostics: () => void;
   showSimulator: boolean;
   onToggleSimulator: () => void;
   soundEnabled: boolean;
@@ -45,6 +47,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenScanner,
   onOpenPairing,
   onOpenBluetooth,
+  onOpenDiagnostics,
   showSimulator,
   onToggleSimulator,
   soundEnabled,
@@ -65,11 +68,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-40 w-full bg-neutral-950/95 backdrop-blur-md border-b border-neutral-800 px-3 py-2.5">
       <div className="max-w-5xl mx-auto flex items-center justify-between gap-2">
         
-        {/* Brand & Connection Badge */}
+        {/* Brand & Connection Badges */}
         <div className="flex items-center gap-2">
           <span className="font-mono font-bold text-sm text-neutral-100 tracking-wider">TCL</span>
           
-          {/* Bluetooth Status Pill */}
+          {/* Bluetooth Status */}
           <button
             onClick={onOpenBluetooth}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs transition-colors border ${
@@ -85,14 +88,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Wi-Fi Status Pill */}
+          {/* Wi-Fi / IP Diagnostics Button */}
           <button
-            onClick={onOpenScanner}
+            onClick={onOpenDiagnostics}
             className="flex items-center gap-1.5 px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl text-xs text-neutral-300 transition-colors"
-            title="Conexión Wi-Fi / IP"
+            title="Diagnóstico de IP y Red Wi-Fi"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span className="font-mono text-[11px] hidden md:inline">{device?.name?.split(' ')[0] || 'Wi-Fi'}</span>
+            <Activity className="w-3.5 h-3.5 text-neutral-400" />
+            <span className="font-mono text-[11px] hidden md:inline">{device?.ip || 'IP / Red'}</span>
           </button>
         </div>
 
@@ -123,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           })}
         </div>
 
-        {/* Quick Actions (Pairing, Bluetooth, Fullscreen, Audio, Simulator) */}
+        {/* Quick Actions (Pairing, Fullscreen, Audio, Simulator) */}
         <div className="flex items-center gap-1.5">
           {/* Sincronizar Inicio+OK */}
           <button
