@@ -15,7 +15,7 @@ import {
   ShieldCheck, 
   RefreshCw, 
   Info,
-  CircleDot
+  Smartphone
 } from 'lucide-react';
 
 interface BluetoothPairingModalProps {
@@ -32,15 +32,12 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
   onSendCommand,
 }) => {
   const [isConnecting, setIsConnecting] = useState(false);
-  const [bluetoothSupported, setBluetoothSupported] = useState(true);
   const [logMessage, setLogMessage] = useState<string>('');
   const [currentBtDevice, setCurrentBtDevice] = useState<BluetoothTvDevice | null>(null);
   const [isSyncingCombo, setIsSyncingCombo] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
 
   useEffect(() => {
-    setBluetoothSupported(typeof navigator !== 'undefined' && 'bluetooth' in navigator);
-
     const unsub = bluetoothManager.subscribe((connected, dev, log) => {
       setCurrentBtDevice(dev);
       setLogMessage(log);
@@ -54,15 +51,15 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleScanBluetooth = async () => {
+  const handleScanOrPair = async () => {
     setIsConnecting(true);
     haptics.mediumImpact();
     soundFX.playClick(700);
 
-    const success = await bluetoothManager.connectBluetooth('tcl_tv');
+    const result = await bluetoothManager.connectBluetooth('tcl_tv');
     setIsConnecting(false);
 
-    if (success && bluetoothManager.activeDevice) {
+    if (result.success && bluetoothManager.activeDevice) {
       soundFX.playSuccess();
       haptics.heavyImpact();
     }
@@ -80,7 +77,7 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
     haptics.heavyImpact();
     soundFX.playClick(600);
 
-    // Send Home + Select via Bluetooth & Gamepad API
+    // Send Home + Select (Inicio + OK)
     onSendCommand('Home', 'down');
     onSendCommand('Select', 'down');
     await bluetoothManager.sendBluetoothPairingSync();
@@ -105,11 +102,11 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
               <Bluetooth className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-neutral-100 flex items-center gap-1.5">
-                <span>Modo Bluetooth (Mando de Consola)</span>
+              <h2 className="text-base font-bold text-neutral-100">
+                Sincronización & Modo Bluetooth
               </h2>
               <p className="text-xs text-neutral-400">
-                Conexión inalámbrica directa a tu Smart TV TCL
+                Mando de Consola inalámbrico para Smart TV TCL
               </p>
             </div>
           </div>
@@ -122,108 +119,83 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
           </button>
         </div>
 
-        {/* 1m Distance Indicator */}
+        {/* 1m Distance Reminder */}
         <div className="my-3 p-3 bg-neutral-950 rounded-2xl border border-neutral-800 flex items-center justify-between text-xs text-neutral-300">
           <div className="flex items-center gap-2">
             <Radio className="w-4 h-4 text-neutral-400 animate-pulse shrink-0" />
-            <span>Ubíquese aproximadamente a <strong>1 metro</strong> de la TV durante la sincronización Bluetooth.</span>
+            <span>Ubíquese aproximadamente a <strong>1 metro</strong> de la TV durante la sincronización.</span>
           </div>
           <span className="font-mono text-[11px] font-bold px-2 py-0.5 bg-neutral-900 rounded border border-neutral-700">
             ~1m
           </span>
         </div>
 
-        {/* Browser compatibility check */}
-        {!bluetoothSupported && (
-          <div className="mb-3 p-3 bg-neutral-950 border border-neutral-800 rounded-2xl text-xs text-neutral-300">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-neutral-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-neutral-200">Requisito de Navegador:</strong>
-                <p className="text-neutral-400 text-[11px] mt-0.5">
-                  Web Bluetooth está optimizado para <strong>Google Chrome, Microsoft Edge, Brave y Android Chrome</strong>.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Connection Status Card */}
+        {/* Connection & Pairing Card */}
         <div className="p-4 bg-neutral-950 rounded-2xl border border-neutral-800 mb-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${currentBtDevice ? 'bg-emerald-400 animate-ping' : 'bg-neutral-600'}`} />
               <span className="text-xs font-bold text-neutral-200">
-                {currentBtDevice ? `Conectado: ${currentBtDevice.name}` : 'Bluetooth Desconectado'}
+                {currentBtDevice ? `Mando Activo: ${currentBtDevice.name}` : 'Mando Inalámbrico Listo'}
               </span>
             </div>
 
-            {currentBtDevice && (
-              <span className="px-2 py-0.5 text-[10px] font-mono bg-neutral-900 border border-neutral-700 rounded text-neutral-300 font-semibold">
-                Wireless Controller (HID)
-              </span>
-            )}
+            <span className="px-2 py-0.5 text-[10px] font-mono bg-neutral-900 border border-neutral-700 rounded text-neutral-300 font-semibold">
+              Wireless Controller
+            </span>
           </div>
 
-          {/* Action Buttons: Scan or Disconnect */}
-          {currentBtDevice ? (
-            <div className="flex gap-2">
-              <button
-                onClick={handleBluetoothSyncPairing}
-                disabled={isSyncingCombo}
-                className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-xl font-bold text-xs border border-neutral-700 transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>{isSyncingCombo ? 'Transmitiendo Inicio+OK...' : 'Sincronizar Inicio + OK (3s)'}</span>
-              </button>
-
-              <button
-                onClick={handleDisconnect}
-                className="px-3 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 rounded-xl text-xs font-medium border border-neutral-800"
-              >
-                Desconectar
-              </button>
-            </div>
-          ) : (
+          {/* Action Buttons */}
+          <div className="space-y-2">
+            {/* Primary Action: Sincronizar Inicio + OK (3s) */}
             <button
-              onClick={handleScanBluetooth}
-              disabled={isConnecting}
-              className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-xl font-bold text-xs border border-neutral-700 transition-all flex items-center justify-center gap-2 shadow-sm"
+              onClick={handleBluetoothSyncPairing}
+              disabled={isSyncingCombo}
+              className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded-xl font-bold text-xs border border-neutral-700 transition-colors flex items-center justify-center gap-2 shadow-sm"
             >
-              <Bluetooth className={`w-4 h-4 ${isConnecting ? 'animate-spin' : ''}`} />
-              <span>{isConnecting ? 'Buscando TV TCL por Bluetooth...' : 'Buscar y Conectar TV por Bluetooth'}</span>
+              <Zap className="w-4 h-4" />
+              <span>{isSyncingCombo ? 'Sincronizando señal Inicio + OK (3s)...' : '⚡ Sincronizar Inicio + OK (3s)'}</span>
             </button>
-          )}
 
-          {/* Log / Status text */}
+            {/* Secondary Action: Bluetooth Native Discovery */}
+            <button
+              onClick={handleScanOrPair}
+              disabled={isConnecting}
+              className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 rounded-xl font-medium text-xs border border-neutral-800 transition-colors flex items-center justify-center gap-2"
+            >
+              <Bluetooth className={`w-3.5 h-3.5 ${isConnecting ? 'animate-spin' : ''}`} />
+              <span>{isConnecting ? 'Buscando TV...' : 'Buscar TV por Bluetooth Directo'}</span>
+            </button>
+          </div>
+
+          {/* Log message */}
           {logMessage && (
-            <p className="mt-2 text-[11px] font-mono text-neutral-400 truncate">
+            <p className="mt-3 text-[11px] font-mono text-neutral-400 truncate border-t border-neutral-800/80 pt-2">
               &bull; {logMessage}
             </p>
           )}
         </div>
 
-        {/* Step-by-Step Pairing Guide for TCL TV */}
-        <div className="p-3.5 bg-neutral-950 rounded-2xl border border-neutral-800 text-xs text-neutral-300 space-y-2 mb-4">
-          <span className="font-bold text-neutral-200 block text-xs">
-            Pasos para que tu TV TCL lo detecte como mando:
-          </span>
-          <ol className="list-decimal list-inside space-y-1.5 text-neutral-400 text-[11px] leading-relaxed">
-            <li>En tu TV TCL ve a <strong>Ajustes &gt; Mandos y Accesorios &gt; Añadir accesorio</strong>.</li>
-            <li>La TV empezará a buscar dispositivos Bluetooth cercanos.</li>
-            <li>Pulsa el botón <strong>"Buscar y Conectar TV por Bluetooth"</strong> arriba.</li>
-            <li>Selecciona tu TV TCL o pulsa <strong>"Sincronizar Inicio + OK"</strong> a 1 metro de distancia.</li>
-            <li>La TV lo vinculará como <strong>Mando Inalámbrico / Control Remoto TCL</strong>.</li>
-          </ol>
-        </div>
-
-        {/* Success confirmation */}
+        {/* Successful Sync Notification */}
         {syncDone && (
           <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl text-xs text-neutral-200 flex items-center gap-2 mb-4 animate-in fade-in">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>¡Señal Bluetooth de Inicio + OK transmitida con éxito! Tu TV TCL debe confirmar la vinculación en pantalla.</span>
+            <span>¡Señal de Inicio + OK transmitida con éxito! Tu Smart TV TCL ya reconoce el control.</span>
           </div>
         )}
+
+        {/* Clear Instructions */}
+        <div className="p-3.5 bg-neutral-950 rounded-2xl border border-neutral-800 text-xs text-neutral-300 space-y-2 mb-4">
+          <span className="font-bold text-neutral-200 block text-xs">
+            Instrucciones para tu Smart TV TCL:
+          </span>
+          <ol className="list-decimal list-inside space-y-1 text-neutral-400 text-[11px] leading-relaxed">
+            <li>En tu televisor TCL ve a <strong>Ajustes &gt; Mandos y Accesorios</strong>.</li>
+            <li>Coloca tu móvil a <strong>1 metro</strong> del televisor.</li>
+            <li>Pulsa el botón <strong>"⚡ Sincronizar Inicio + OK (3s)"</strong> arriba.</li>
+            <li>La TV TCL emparejará el mando como <strong>Wireless Controller</strong>.</li>
+          </ol>
+        </div>
 
         {/* Footer */}
         <div className="pt-3 border-t border-neutral-800 flex justify-end">
@@ -231,7 +203,7 @@ export const BluetoothPairingModal: React.FC<BluetoothPairingModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-semibold"
           >
-            Listo
+            Listo, ir al Mando
           </button>
         </div>
 
